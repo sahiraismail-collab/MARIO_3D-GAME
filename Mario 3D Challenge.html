@@ -1,0 +1,1311 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mario 3D Challenge – Bentuk dan Bentangan</title>
+    <!-- Tailwind CSS untuk UI Overlay, Modals & Dashboard -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&display=swap');
+
+        body {
+            font-family: 'Fredoka', cursive, sans-serif;
+            background-color: #0f172a;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: manipulation;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #f59e0b;
+            border-radius: 4px;
+        }
+
+        @keyframes floatSlow {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-8px); }
+        }
+        .animate-float {
+            animation: floatSlow 2.5s ease-in-out infinite;
+        }
+    </style>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'mario-3d-challenge-app';
+        let firebaseConfig = null;
+        try {
+            if (typeof __firebase_config !== 'undefined') {
+                firebaseConfig = JSON.parse(__firebase_config);
+            }
+        } catch (e) {
+            console.warn("Firebase config parse fallback:", e);
+        }
+
+        if (!firebaseConfig) {
+            firebaseConfig = {
+                apiKey: "AIzaSyDemoPlaceholderOnlyForLocalTesting",
+                authDomain: "demo-app.firebaseapp.com",
+                projectId: "demo-app",
+                storageBucket: "demo-app.appspot.com",
+                messagingSenderId: "123456789",
+                appId: "1:123456789:web:demo"
+            };
+        }
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        window.db = db;
+        window.appId = appId;
+        window.auth = auth;
+
+        async function initAuth() {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                window.isAuthReady = true;
+            } catch (err) {
+                console.warn("Auth init warning (using localStorage fallback):", err);
+                window.isAuthReady = false;
+            }
+        }
+
+        initAuth();
+    </script>
+</head>
+<body class="h-screen w-screen flex flex-col justify-center items-center overflow-hidden text-white p-2 md:p-4">
+
+    <div class="relative w-full max-w-5xl h-[95vh] max-h-[720px] bg-sky-400 rounded-3xl shadow-2xl overflow-hidden border-4 border-yellow-400 flex flex-col">
+        
+        <!-- Top HUD Banner -->
+        <div class="bg-red-600 border-b-4 border-amber-300 px-4 py-2 flex flex-wrap justify-between items-center text-xs md:text-sm shadow-md z-10 font-bold">
+            <div class="flex items-center space-x-3">
+                <div class="bg-red-800 px-3 py-1 rounded-xl border border-red-400 flex items-center space-x-1">
+                    <span class="text-yellow-300">👤 MURID:</span>
+                    <span id="hud-student-name" class="text-white font-semibold">--</span>
+                </div>
+                <div class="bg-red-800 px-3 py-1 rounded-xl border border-red-400 flex items-center space-x-1">
+                    <span class="text-yellow-300">🎯 MISI:</span>
+                    <span id="hud-mission" class="text-white font-mono text-base">1/10</span>
+                </div>
+            </div>
+            <div class="flex items-center space-x-3 mt-1 sm:mt-0">
+                <div class="bg-red-800 px-3 py-1 rounded-xl border border-red-400 flex items-center space-x-1">
+                    <span class="text-yellow-300">⭐ SKOR:</span>
+                    <span id="hud-score" class="text-yellow-300 font-mono text-base">0</span>
+                </div>
+                <div class="bg-red-800 px-3 py-1 rounded-xl border border-red-400 flex items-center space-x-1">
+                    <span class="text-yellow-300">🪙 SYILING:</span>
+                    <span id="hud-coins" class="text-amber-300 font-mono text-base">0</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="relative flex-1 w-full h-full overflow-hidden bg-sky-400">
+            <canvas id="gameCanvas" class="w-full h-full block"></canvas>
+
+            <!-- Touch Controls -->
+            <div id="touch-controls" class="absolute bottom-3 left-3 right-3 flex justify-between items-center opacity-85 pointer-events-auto md:hidden z-20">
+                <div class="flex space-x-2">
+                    <button id="btn-left" class="w-14 h-14 bg-red-500 active:bg-red-700 text-white font-bold text-2xl rounded-full border-4 border-white shadow-lg flex items-center justify-center cursor-pointer">◀</button>
+                    <button id="btn-right" class="w-14 h-14 bg-red-500 active:bg-red-700 text-white font-bold text-2xl rounded-full border-4 border-white shadow-lg flex items-center justify-center cursor-pointer">▶</button>
+                </div>
+                <button id="btn-jump" class="w-16 h-16 bg-yellow-500 active:bg-yellow-600 text-white font-bold text-base rounded-full border-4 border-white shadow-lg flex items-center justify-center cursor-pointer">LOMPAT</button>
+            </div>
+        </div>
+
+        <div id="start-screen" class="absolute inset-0 bg-sky-500/95 flex flex-col items-center justify-center p-4 md:p-6 text-center z-30 overflow-y-auto">
+            <div class="bg-white text-slate-800 p-6 rounded-3xl border-4 border-yellow-400 max-w-lg w-full flex flex-col items-center shadow-2xl relative">
+                
+                <!-- Teacher Dashboard Button -->
+                <button id="btn-open-teacher" class="absolute top-4 right-4 bg-amber-100 hover:bg-amber-200 text-amber-900 border-2 border-amber-400 font-bold text-xs px-3 py-1.5 rounded-full flex items-center space-x-1 transition cursor-pointer">
+                    <span>📊 Mod Guru / Rekod</span>
+                </button>
+
+                <div class="text-3xl md:text-4xl font-black text-red-600 drop-shadow-md mt-2 mb-1 tracking-wide">
+                    SUPER MARIO
+                </div>
+                <div class="text-xl md:text-2xl font-extrabold text-amber-500 mb-3">
+                    3D Challenge: Bentuk & Bentangan
+                </div>
+                
+                <p class="text-xs md:text-sm text-slate-600 mb-4 leading-relaxed font-medium bg-amber-50 p-3 rounded-2xl border border-amber-200">
+                    Sila masukkan nama dan kelas anda sebelum memulakan kembara dalam Dunia Bentuk 3D!
+                </p>
+
+                <!-- Student Registration Form -->
+                <div class="w-full space-y-3 mb-5 text-left">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">NAMA MURID:</label>
+                        <input type="text" id="input-student-name" placeholder="Contoh: Ahmad Zaki" class="w-full px-4 py-2.5 bg-slate-50 border-2 border-slate-300 rounded-xl focus:outline-none focus:border-yellow-500 font-semibold text-slate-800 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">KELAS:</label>
+                        <input type="text" id="input-student-class" placeholder="Contoh: Peralihan A" class="w-full px-4 py-2.5 bg-slate-50 border-2 border-slate-300 rounded-xl focus:outline-none focus:border-yellow-500 font-semibold text-slate-800 text-sm">
+                    </div>
+                </div>
+
+                <button id="btn-start" class="w-full py-3.5 bg-yellow-400 hover:bg-yellow-300 active:scale-95 text-red-900 font-extrabold text-xl rounded-2xl border-4 border-white shadow-xl transition transform cursor-pointer">
+                    🎮 MULA PERMAINAN
+                </button>
+            </div>
+        </div>
+
+        <div id="teacher-modal" class="hidden absolute inset-0 bg-slate-900/90 flex items-center justify-center p-4 z-50">
+            <div class="bg-white text-slate-800 rounded-3xl border-4 border-amber-400 max-w-3xl w-full p-5 md:p-6 shadow-2xl flex flex-col max-h-[90vh]">
+                <!-- Header -->
+                <div class="flex justify-between items-center mb-4 border-b-2 border-slate-100 pb-3">
+                    <div>
+                        <h2 class="text-xl font-black text-slate-800 flex items-center space-x-2">
+                            <span>📊 Dashboard & Rekod Murid</span>
+                        </h2>
+                        <p class="text-xs text-slate-500">Senarai murid yang telah menyiapkan permainan & menjawab soalan</p>
+                    </div>
+                    <button id="btn-close-teacher" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold px-3 py-1.5 rounded-xl text-xs transition cursor-pointer">
+                        ✕ Tutup
+                    </button>
+                </div>
+
+                <!-- Actions Banner -->
+                <div class="flex flex-wrap justify-between items-center mb-3 gap-2">
+                    <span id="records-count" class="text-xs font-bold text-amber-700 bg-amber-50 px-3 py-1.5 rounded-full border border-amber-200">
+                        0 Rekod Disimpan
+                    </span>
+                    <div class="flex space-x-2">
+                        <button id="btn-clear-records" class="bg-red-100 hover:bg-red-200 text-red-700 font-bold text-xs px-3 py-2 rounded-xl border border-red-300 transition cursor-pointer">
+                            🗑️ Padam Rekod
+                        </button>
+                        <button id="btn-export-csv" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center space-x-1 shadow transition cursor-pointer">
+                            <span>📥 Muat Turun CSV / Excel</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Records Table -->
+                <div class="flex-1 overflow-y-auto border-2 border-slate-200 rounded-2xl bg-slate-50 mb-2">
+                    <table class="w-full text-left text-xs md:text-sm">
+                        <thead class="bg-slate-200 text-slate-700 sticky top-0 font-bold">
+                            <tr>
+                                <th class="p-2.5">Nama Murid</th>
+                                <th class="p-2.5">Kelas</th>
+                                <th class="p-2.5 text-center">Skor</th>
+                                <th class="p-2.5 text-center">Jawapan Betul</th>
+                                <th class="p-2.5 text-center">Status</th>
+                                <th class="p-2.5 text-right">Tarikh & Masa</th>
+                            </tr>
+                        </thead>
+                        <tbody id="teacher-records-table-body" class="divide-y divide-slate-200 text-slate-800">
+                            <tr>
+                                <td colspan="6" class="p-6 text-center text-slate-400 font-medium">Memuatkan rekod murid...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div id="quiz-modal" class="hidden absolute inset-0 bg-black/80 flex items-center justify-center p-4 z-40">
+            <div class="bg-white text-slate-800 rounded-3xl border-4 border-yellow-400 max-w-2xl w-full p-5 md:p-6 shadow-2xl flex flex-col max-h-[90vh] overflow-y-auto">
+                <div class="flex justify-between items-center mb-3 border-b-2 border-slate-200 pb-2">
+                    <span id="quiz-checkpoint-title" class="text-xs md:text-sm font-bold bg-yellow-400 text-yellow-950 px-3 py-1 rounded-full">
+                        SOALAN 1 / 10
+                    </span>
+                    <span class="text-xs font-semibold text-slate-500">Amalan Bahasa Melayu – Bentuk 3D</span>
+                </div>
+
+                <h2 id="quiz-question" class="text-base md:text-lg font-bold text-slate-800 mb-3 text-center">
+                    Soalan...
+                </h2>
+
+                <div id="quiz-graphic" class="w-full h-40 bg-sky-50 rounded-2xl border-2 border-sky-200 flex items-center justify-center p-2 mb-4 overflow-hidden relative">
+                </div>
+
+                <div id="quiz-options" class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                </div>
+
+                <div id="quiz-feedback" class="hidden p-3 rounded-xl font-bold text-center text-xs md:text-sm transition-all duration-300">
+                </div>
+
+                <button id="btn-next-question" class="hidden mt-3 w-full py-3 bg-green-500 hover:bg-green-600 text-white font-extrabold text-base md:text-lg rounded-xl shadow-lg transition cursor-pointer">
+                    SETERUSNYA ➔
+                </button>
+            </div>
+        </div>
+
+        <div id="victory-modal" class="hidden absolute inset-0 bg-amber-500/90 flex flex-col items-center justify-center p-6 text-center z-50 overflow-y-auto">
+            <div class="bg-white text-slate-900 p-6 md:p-8 rounded-3xl border-4 border-yellow-300 max-w-lg w-full shadow-2xl flex flex-col items-center">
+                <div class="text-6xl mb-2 animate-bounce">🏆</div>
+                <h1 class="text-2xl md:text-3xl font-black text-red-600 mb-1">TAHNIAH! ANDA BERJAYA!</h1>
+                <p class="text-base md:text-lg font-bold text-amber-700 mb-4">
+                    ANDA TELAH MENJADI JUARA BENTUK 3D DAN BENTANGANNYA!
+                </p>
+
+                <div class="w-full bg-amber-50 p-4 rounded-2xl border-2 border-amber-200 mb-4 space-y-2 text-left text-sm font-bold text-slate-700">
+                    <div class="flex justify-between">
+                        <span>Nama:</span>
+                        <span id="final-name" class="text-slate-900">--</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span>Markah Terkumpul:</span>
+                        <span id="final-score" class="text-xl text-yellow-600">0</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span>Jawapan Betul:</span>
+                        <span id="final-correct" class="text-xl text-green-600">0 / 10</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span>Bonus Penamat:</span>
+                        <span class="text-xl text-blue-600">+50</span>
+                    </div>
+                </div>
+
+                <div class="mb-4 text-xs font-semibold text-emerald-700 bg-emerald-100 px-4 py-2 rounded-xl border border-emerald-300 w-full">
+                    ✅ Rekod anda telah berjaya disimpan untuk semakan guru!
+                </div>
+
+                <button id="btn-restart" class="w-full py-3.5 bg-red-600 hover:bg-red-700 text-white font-extrabold text-xl rounded-2xl border-4 border-yellow-300 shadow-xl transition transform active:scale-95 cursor-pointer">
+                    🔄 MAIN SEMULA
+                </button>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        class SoundController {
+            constructor() {
+                this.ctx = null;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+            }
+
+            playCoin() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(987.77, this.ctx.currentTime);
+                osc.frequency.setValueAtTime(1318.51, this.ctx.currentTime + 0.08);
+                gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.3);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.3);
+            }
+
+            playJump() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(150, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(400, this.ctx.currentTime + 0.15);
+                gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.15);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.15);
+            }
+
+            playCorrect() {
+                if (!this.ctx) return;
+                const notes = [523.25, 659.25, 783.99, 1046.50];
+                notes.forEach((freq, index) => {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(freq, this.ctx.currentTime + index * 0.08);
+                    gain.gain.setValueAtTime(0.2, this.ctx.currentTime + index * 0.08);
+                    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + index * 0.08 + 0.2);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start(this.ctx.currentTime + index * 0.08);
+                    osc.stop(this.ctx.currentTime + index * 0.08 + 0.2);
+                });
+            }
+
+            playWrong() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(220, this.ctx.currentTime);
+                osc.frequency.setValueAtTime(180, this.ctx.currentTime + 0.15);
+                gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.3);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.3);
+            }
+
+            playVictory() {
+                if (!this.ctx) return;
+                const melody = [
+                    {f: 523.25, d: 0.15}, {f: 659.25, d: 0.15}, {f: 783.99, d: 0.15},
+                    {f: 1046.50, d: 0.3}, {f: 880, d: 0.15}, {f: 1046.50, d: 0.4}
+                ];
+                let curTime = this.ctx.currentTime;
+                melody.forEach(note => {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(note.f, curTime);
+                    gain.gain.setValueAtTime(0.25, curTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, curTime + note.d);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start(curTime);
+                    osc.stop(curTime + note.d);
+                    curTime += note.d;
+                });
+            }
+        }
+
+        const soundManager = new SoundController();
+
+        const SVGGallery = {
+            cubeObject: `
+                <svg width="110" height="110" viewBox="0 0 100 100" class="drop-shadow-md">
+                    <path d="M 20 35 L 50 20 L 80 35 L 50 50 Z" fill="#ef4444" stroke="#991b1b" stroke-width="2"/>
+                    <path d="M 20 35 L 50 50 L 50 85 L 20 70 Z" fill="#dc2626" stroke="#991b1b" stroke-width="2"/>
+                    <path d="M 50 50 L 80 35 L 80 70 L 50 85 Z" fill="#b91c1c" stroke="#991b1b" stroke-width="2"/>
+                    <circle cx="50" cy="35" r="3" fill="#fff"/>
+                    <circle cx="35" cy="52" r="3" fill="#fff"/><circle cx="35" cy="68" r="3" fill="#fff"/>
+                    <circle cx="65" cy="52" r="3" fill="#fff"/><circle cx="65" cy="68" r="3" fill="#fff"/>
+                    <circle cx="50" cy="60" r="3" fill="#fff"/>
+                </svg>`,
+            cuboidObject: `
+                <svg width="130" height="100" viewBox="0 0 120 90" class="drop-shadow-md">
+                    <path d="M 15 35 L 45 20 L 105 20 L 75 35 Z" fill="#3b82f6" stroke="#1e40af" stroke-width="2"/>
+                    <path d="M 15 35 L 75 35 L 75 75 L 15 75 Z" fill="#2563eb" stroke="#1e40af" stroke-width="2"/>
+                    <path d="M 75 35 L 105 20 L 105 60 L 75 75 Z" fill="#1d4ed8" stroke="#1e40af" stroke-width="2"/>
+                    <text x="45" y="60" font-family="sans-serif" font-weight="bold" font-size="12" fill="#ffffff">KASUT</text>
+                </svg>`,
+            cylinderObject: `
+                <svg width="100" height="110" viewBox="0 0 90 100" class="drop-shadow-md">
+                    <rect x="20" y="25" width="50" height="55" fill="#22c55e" stroke="#15803d" stroke-width="2"/>
+                    <ellipse cx="45" cy="25" rx="25" ry="10" fill="#4ade80" stroke="#15803d" stroke-width="2"/>
+                    <ellipse cx="45" cy="80" rx="25" ry="10" fill="#16a34a" stroke="#15803d" stroke-width="2"/>
+                    <text x="45" y="58" text-anchor="middle" font-weight="bold" font-size="12" fill="#fff">JUICE</text>
+                </svg>`,
+            coneObject: `
+                <svg width="100" height="110" viewBox="0 0 90 100" class="drop-shadow-md">
+                    <path d="M 15 35 L 75 35 L 45 85 Z" fill="#f97316" stroke="#c2410c" stroke-width="2"/>
+                    <ellipse cx="45" cy="35" rx="30" ry="12" fill="#fdba74" stroke="#c2410c" stroke-width="2"/>
+                    <circle cx="45" cy="25" r="20" fill="#ec4899"/>
+                </svg>`,
+            sphereObject: `
+                <svg width="100" height="100" viewBox="0 0 100 100" class="drop-shadow-md">
+                    <circle cx="50" cy="50" r="40" fill="url(#sphereGrad)" stroke="#1e293b" stroke-width="2"/>
+                    <path d="M 20 40 Q 50 60 80 40" fill="none" stroke="#ffffff" stroke-width="3" stroke-dasharray="4 4"/>
+                    <defs>
+                        <radialGradient id="sphereGrad" cx="35%" cy="35%" r="65%">
+                            <stop offset="0%" stop-color="#38bdf8"/>
+                            <stop offset="70%" stop-color="#0284c7"/>
+                            <stop offset="100%" stop-color="#0369a1"/>
+                        </radialGradient>
+                    </defs>
+                </svg>`,
+            pyramidObject: `
+                <svg width="110" height="110" viewBox="0 0 100 100" class="drop-shadow-md">
+                    <path d="M 50 15 L 15 75 L 60 85 Z" fill="#eab308" stroke="#a16207" stroke-width="2"/>
+                    <path d="M 50 15 L 60 85 L 85 70 Z" fill="#ca8a04" stroke="#a16207" stroke-width="2"/>
+                </svg>`,
+            cubeNet: `
+                <svg width="130" height="100" viewBox="0 0 120 90" class="drop-shadow-md">
+                    <g fill="#fecdd3" stroke="#e11d48" stroke-width="2">
+                        <rect x="45" y="5" width="20" height="20" />
+                        <rect x="25" y="25" width="20" height="20" />
+                        <rect x="45" y="25" width="20" height="20" />
+                        <rect x="65" y="25" width="20" height="20" />
+                        <rect x="45" y="45" width="20" height="20" />
+                        <rect x="45" y="65" width="20" height="20" />
+                    </g>
+                </svg>`,
+            cylinderNet: `
+                <svg width="130" height="100" viewBox="0 0 120 90" class="drop-shadow-md">
+                    <g fill="#bbf7d0" stroke="#16a34a" stroke-width="2">
+                        <circle cx="60" cy="15" r="12" />
+                        <rect x="20" y="30" width="80" height="30" />
+                        <circle cx="60" cy="75" r="12" />
+                    </g>
+                </svg>`,
+            coneNet: `
+                <svg width="130" height="100" viewBox="0 0 120 90" class="drop-shadow-md">
+                    <g fill="#fed7aa" stroke="#ea580c" stroke-width="2">
+                        <path d="M 60 45 L 20 15 A 45 45 0 0 0 100 15 Z" />
+                        <circle cx="60" cy="65" r="12" />
+                    </g>
+                </svg>`,
+            pyramidNet: `
+                <svg width="130" height="100" viewBox="0 0 120 90" class="drop-shadow-md">
+                    <g fill="#fef08a" stroke="#ca8a04" stroke-width="2">
+                        <rect x="45" y="35" width="30" height="30" />
+                        <polygon points="45,35 75,35 60,10" />
+                        <polygon points="75,35 75,65 100,50" />
+                        <polygon points="45,65 75,65 60,90" />
+                        <polygon points="45,35 45,65 20,50" />
+                    </g>
+                </svg>`
+        };
+
+        const quizData = [
+            {
+                q: "Apakah nama bentuk 3D bagi dadu ini?",
+                graphic: SVGGallery.cubeObject,
+                options: [
+                    { text: "A. Kiub", isCorrect: true },
+                    { text: "B. Kon", isCorrect: false },
+                    { text: "C. Silinder", isCorrect: false },
+                    { text: "D. Sfera", isCorrect: false }
+                ],
+                explanation: "Dadu berbentuk Kiub kerana mempunyai 6 muka segi empat sama."
+            },
+            {
+                q: "Kotak kasut ini mempunyai bentuk apa?",
+                graphic: SVGGallery.cuboidObject,
+                options: [
+                    { text: "A. Sfera", isCorrect: false },
+                    { text: "B. Kuboid", isCorrect: true },
+                    { text: "C. Kon", isCorrect: false },
+                    { text: "D. Silinder", isCorrect: false }
+                ],
+                explanation: "Kotak kasut berbentuk Kuboid kerana mempunyai muka segi empat tepat."
+            },
+            {
+                q: "Apakah bentuk 3D bagi tin minuman ini?",
+                graphic: SVGGallery.cylinderObject,
+                options: [
+                    { text: "A. Kiub", isCorrect: false },
+                    { text: "B. Piramid", isCorrect: false },
+                    { text: "C. Silinder", isCorrect: true },
+                    { text: "D. Sfera", isCorrect: false }
+                ],
+                explanation: "Tin minuman berbentuk Silinder."
+            },
+            {
+                q: "Apakah bentuk 3D bagi ais krim ini?",
+                graphic: SVGGallery.coneObject,
+                options: [
+                    { text: "A. Kon", isCorrect: true },
+                    { text: "B. Kuboid", isCorrect: false },
+                    { text: "C. Sfera", isCorrect: false },
+                    { text: "D. Kiub", isCorrect: false }
+                ],
+                explanation: "Kon ais krim berbentuk Kon."
+            },
+            {
+                q: "Apakah bentuk 3D bagi bola ini?",
+                graphic: SVGGallery.sphereObject,
+                options: [
+                    { text: "A. Silinder", isCorrect: false },
+                    { text: "B. Sfera", isCorrect: true },
+                    { text: "C. Kuboid", isCorrect: false },
+                    { text: "D. Piramid", isCorrect: false }
+                ],
+                explanation: "Bola berbentuk Sfera."
+            },
+            {
+                q: "Apakah nama bentuk 3D ini?",
+                graphic: SVGGallery.pyramidObject,
+                options: [
+                    { text: "A. Kon", isCorrect: false },
+                    { text: "B. Silinder", isCorrect: false },
+                    { text: "C. Piramid", isCorrect: true },
+                    { text: "D. Kuboid", isCorrect: false }
+                ],
+                explanation: "Objek ini ialah Piramid."
+            },
+            {
+                q: "Bentangan manakah yang boleh membentuk sebuah KIUB?",
+                graphic: null,
+                isVisualOptions: true,
+                options: [
+                    { svg: SVGGallery.cubeNet, label: "A. 6 segi empat sama", isCorrect: true },
+                    { svg: SVGGallery.cylinderNet, label: "B. 2 bulatan & 1 segi empat", isCorrect: false },
+                    { svg: SVGGallery.coneNet, label: "C. 1 bulatan & 1 sektor", isCorrect: false },
+                    { svg: SVGGallery.pyramidNet, label: "D. 1 segi empat & 4 segi tiga", isCorrect: false }
+                ],
+                explanation: "Kiub dibentuk daripada bentangan 6 buah segi empat sama."
+            },
+            {
+                q: "Bentangan manakah yang boleh membentuk sebuah SILINDER?",
+                graphic: null,
+                isVisualOptions: true,
+                options: [
+                    { svg: SVGGallery.cubeNet, label: "A. 6 segi empat sama", isCorrect: false },
+                    { svg: SVGGallery.cylinderNet, label: "B. 2 bulatan & 1 segi empat tepat", isCorrect: true },
+                    { svg: SVGGallery.coneNet, label: "C. 1 bulatan & 1 sektor", isCorrect: false },
+                    { svg: SVGGallery.pyramidNet, label: "D. 4 segi tiga", isCorrect: false }
+                ],
+                explanation: "Silinder terdiri daripada 2 bulatan dan 1 segi empat tepat."
+            },
+            {
+                q: "Bentangan manakah yang boleh membentuk sebuah KON?",
+                graphic: null,
+                isVisualOptions: true,
+                options: [
+                    { svg: SVGGallery.cubeNet, label: "A. 6 segi empat sama", isCorrect: false },
+                    { svg: SVGGallery.cylinderNet, label: "B. 2 bulatan & 1 segi empat", isCorrect: false },
+                    { svg: SVGGallery.coneNet, label: "C. 1 bulatan & 1 sektor bulatan", isCorrect: true },
+                    { svg: SVGGallery.pyramidNet, label: "D. 4 segi tiga", isCorrect: false }
+                ],
+                explanation: "Kon dibentuk daripada 1 sektor bulatan dan 1 bulatan."
+            },
+            {
+                q: "Apabila bentangan ini dilipat, apakah bentuk 3D yang terhasil?",
+                graphic: SVGGallery.cubeNet,
+                options: [
+                    { text: "A. Silinder", isCorrect: false },
+                    { text: "B. Kon", isCorrect: false },
+                    { text: "C. Kiub", isCorrect: true },
+                    { text: "D. Sfera", isCorrect: false }
+                ],
+                explanation: "Bentangan 6 segi empat sama akan menghasilkan Kiub."
+            }
+        ];
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        let gameState = 'START';
+        let studentName = "";
+        let studentClass = "";
+        let score = 0;
+        let coinsCollected = 0;
+        let correctAnswersCount = 0;
+        let currentQuestionIndex = 0;
+
+        // Load persisted local records from LocalStorage
+        const STORAGE_KEY = 'mario_3d_student_records_v1';
+        let localRecordsList = [];
+        try {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) {
+                localRecordsList = JSON.parse(saved);
+            }
+        } catch (e) {
+            console.warn("Error reading localStorage:", e);
+        }
+
+        const mario = {
+            x: 50,
+            y: 0,
+            width: 36,
+            height: 48,
+            vx: 0,
+            vy: 0,
+            speed: 4.5,
+            jumpStrength: -12.5,
+            isGrounded: false,
+            facing: 'right'
+        };
+
+        const keys = { left: false, right: false, up: false };
+        let cameraX = 0;
+
+        let platforms = [];
+        let coins = [];
+        let pipes = [];
+        let checkpoints = [];
+        let enemies = [];
+        let trophy = null;
+
+        function resizeCanvas() {
+            canvas.width = canvas.parentElement.clientWidth;
+            canvas.height = canvas.parentElement.clientHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        function initLevel() {
+            platforms = [];
+            coins = [];
+            pipes = [];
+            checkpoints = [];
+            enemies = [];
+
+            const groundY = canvas.height - 60;
+            mario.y = groundY - mario.height;
+            mario.x = 50;
+            mario.vx = 0;
+            mario.vy = 0;
+
+            let startX = 0;
+            for (let i = 0; i < 10; i++) {
+                platforms.push({ x: startX, y: groundY, width: 450, height: 60 });
+                pipes.push({ x: startX + 220, y: groundY - 60, width: 50, height: 60 });
+
+                coins.push({ x: startX + 150, y: groundY - 100, collected: false, radius: 10 });
+                coins.push({ x: startX + 180, y: groundY - 120, collected: false, radius: 10 });
+                coins.push({ x: startX + 310, y: groundY - 100, collected: false, radius: 10 });
+
+                checkpoints.push({
+                    index: i,
+                    x: startX + 400,
+                    y: groundY - 80,
+                    width: 30,
+                    height: 80,
+                    triggered: false
+                });
+
+                startX += 550;
+            }
+
+            const finalStartX = startX;
+            platforms.push({ x: finalStartX, y: groundY, width: 800, height: 60 });
+
+            enemies.push({ x: finalStartX + 200, y: groundY - 30, width: 30, height: 30, vx: -1.5, minX: finalStartX + 100, maxX: finalStartX + 350 });
+            enemies.push({ x: finalStartX + 420, y: groundY - 30, width: 30, height: 30, vx: 2.0, minX: finalStartX + 350, maxX: finalStartX + 580 });
+
+            coins.push({ x: finalStartX + 250, y: groundY - 90, collected: false, radius: 10 });
+            coins.push({ x: finalStartX + 450, y: groundY - 90, collected: false, radius: 10 });
+
+            trophy = {
+                x: finalStartX + 650,
+                y: groundY - 90,
+                width: 50,
+                height: 60,
+                touched: false
+            };
+        }
+
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'ArrowLeft' || e.code === 'KeyA') keys.left = true;
+            if (e.code === 'ArrowRight' || e.code === 'KeyD') keys.right = true;
+            if (e.code === 'ArrowUp' || e.code === 'Space' || e.code === 'KeyW') {
+                if (!keys.up && mario.isGrounded) {
+                    mario.vy = mario.jumpStrength;
+                    mario.isGrounded = false;
+                    soundManager.playJump();
+                }
+                keys.up = true;
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (e.code === 'ArrowLeft' || e.code === 'KeyA') keys.left = false;
+            if (e.code === 'ArrowRight' || e.code === 'KeyD') keys.right = false;
+            if (e.code === 'ArrowUp' || e.code === 'Space' || e.code === 'KeyW') keys.up = false;
+        });
+
+        const setupTouchBtn = (id, keyName) => {
+            const btn = document.getElementById(id);
+            btn.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                soundManager.init();
+                if (keyName === 'up') {
+                    if (mario.isGrounded) {
+                        mario.vy = mario.jumpStrength;
+                        mario.isGrounded = false;
+                        soundManager.playJump();
+                    }
+                } else {
+                    keys[keyName] = true;
+                }
+            });
+            btn.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                if (keyName !== 'up') keys[keyName] = false;
+            });
+        };
+        setupTouchBtn('btn-left', 'left');
+        setupTouchBtn('btn-right', 'right');
+        setupTouchBtn('btn-jump', 'up');
+
+        async function saveStudentResultToCloud(completed = true) {
+            const payload = {
+                studentName: studentName || "Tanpa Nama",
+                studentClass: studentClass || "Peralihan",
+                score: score,
+                correctAnswers: correctAnswersCount,
+                totalQuestions: 10,
+                coins: coinsCollected,
+                completed: completed,
+                timestamp: new Date().toLocaleString('ms-MY', {
+                    day: '2-digit', month: '2-digit', year: 'numeric',
+                    hour: '2-digit', minute: '2-digit'
+                })
+            };
+
+            // Remove existing record for same student/class to update latest score
+            localRecordsList = localRecordsList.filter(r => 
+                !(r.studentName.toLowerCase() === payload.studentName.toLowerCase() && r.studentClass.toLowerCase() === payload.studentClass.toLowerCase())
+            );
+            localRecordsList.unshift(payload);
+
+            // Save to LocalStorage permanently
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(localRecordsList));
+            } catch (e) {
+                console.warn("Could not save to localStorage:", e);
+            }
+
+            // Sync to Firestore if online
+            try {
+                if (window.db && window.isAuthReady) {
+                    const { db, appId } = window;
+                    const recordsCol = collection(db, 'artifacts', appId, 'public', 'data', 'student_records');
+                    await addDoc(recordsCol, {
+                        ...payload,
+                        createdAt: serverTimestamp()
+                    });
+                }
+            } catch (err) {
+                console.warn("Firestore sync warning:", err);
+            }
+        }
+
+        function listenToStudentRecords() {
+            // Merge Firestore records with local records if available
+            if (!window.db || !window.isAuthReady) {
+                renderTeacherTable(localRecordsList);
+                return;
+            }
+
+            try {
+                const { db, appId } = window;
+                const recordsCol = collection(db, 'artifacts', appId, 'public', 'data', 'student_records');
+                
+                onSnapshot(recordsCol, (snapshot) => {
+                    const fetchedRecords = [];
+                    snapshot.forEach(doc => {
+                        fetchedRecords.push(doc.data());
+                    });
+                    
+                    // Combine and deduplicate
+                    const combined = [...localRecordsList];
+                    fetchedRecords.forEach(fr => {
+                        if (!combined.some(c => c.studentName === fr.studentName && c.timestamp === fr.timestamp)) {
+                            combined.push(fr);
+                        }
+                    });
+
+                    combined.sort((a, b) => (b.score || 0) - (a.score || 0));
+                    renderTeacherTable(combined);
+                }, (error) => {
+                    console.warn("Firestore snapshot fallback:", error);
+                    renderTeacherTable(localRecordsList);
+                });
+            } catch (e) {
+                renderTeacherTable(localRecordsList);
+            }
+        }
+
+        function renderTeacherTable(records) {
+            const tbody = document.getElementById('teacher-records-table-body');
+            document.getElementById('records-count').innerText = `${records.length} Rekod Disimpan`;
+
+            if (records.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" class="p-6 text-center text-slate-400 font-medium">Belum ada rekod murid yang diselesaikan.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = records.map(rec => `
+                <tr class="hover:bg-slate-100 transition">
+                    <td class="p-2.5 font-bold text-slate-900">${rec.studentName}</td>
+                    <td class="p-2.5 font-semibold text-slate-600">${rec.studentClass}</td>
+                    <td class="p-2.5 text-center font-mono font-bold text-amber-600">${rec.score}</td>
+                    <td class="p-2.5 text-center font-bold text-emerald-600">${rec.correctAnswers} / 10</td>
+                    <td class="p-2.5 text-center">
+                        <span class="px-2.5 py-0.5 text-[10px] font-bold rounded-full ${rec.completed ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-amber-100 text-amber-800 border border-amber-300'}">
+                            ${rec.completed ? 'TAMAT 🏆' : 'DALAM PROSES'}
+                        </span>
+                    </td>
+                    <td class="p-2.5 text-right text-xs text-slate-500 font-medium">${rec.timestamp || '-'}</td>
+                </tr>
+            `).join('');
+        }
+
+        document.getElementById('btn-export-csv').addEventListener('click', () => {
+            if (localRecordsList.length === 0) {
+                alert("Tiada rekod murid untuk dimuat turun.");
+                return;
+            }
+            let csvContent = "data:text/csv;charset=utf-8,Nama Murid,Kelas,Skor,Jawapan Betul,Status,Tarikh & Masa\n";
+            localRecordsList.forEach(r => {
+                csvContent += `"${r.studentName}","${r.studentClass}",${r.score},"${r.correctAnswers}/10","${r.completed ? 'Selesai' : 'Dalam Proses'}","${r.timestamp}"\n`;
+            });
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", `Rekod_Murid_Mario3D_${new Date().toISOString().slice(0,10)}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        });
+
+        document.getElementById('btn-clear-records').addEventListener('click', () => {
+            if (confirm("Adakah anda pasti mahu memadam semua rekod murid yang disimpan?")) {
+                localRecordsList = [];
+                localStorage.removeItem(STORAGE_KEY);
+                renderTeacherTable([]);
+                alert("Semua rekod telah dipadam.");
+            }
+        });
+
+        document.getElementById('btn-open-teacher').addEventListener('click', () => {
+            document.getElementById('teacher-modal').classList.remove('hidden');
+            listenToStudentRecords();
+        });
+
+        document.getElementById('btn-close-teacher').addEventListener('click', () => {
+            document.getElementById('teacher-modal').classList.add('hidden');
+        });
+
+        document.getElementById('btn-start').addEventListener('click', () => {
+            const nameInput = document.getElementById('input-student-name').value.trim();
+            const classInput = document.getElementById('input-student-class').value.trim();
+
+            if (!nameInput) {
+                alert("Sila masukkan nama anda terlebih dahulu!");
+                return;
+            }
+
+            studentName = nameInput;
+            studentClass = classInput || "Peralihan";
+            document.getElementById('hud-student-name').innerText = studentName;
+
+            // Register initial record
+            saveStudentResultToCloud(false);
+
+            soundManager.init();
+            document.getElementById('start-screen').classList.add('hidden');
+            gameState = 'PLAYING';
+            initLevel();
+        });
+
+        document.getElementById('btn-restart').addEventListener('click', () => {
+            document.getElementById('victory-modal').classList.add('hidden');
+            score = 0;
+            coinsCollected = 0;
+            correctAnswersCount = 0;
+            currentQuestionIndex = 0;
+            updateHUD();
+            gameState = 'PLAYING';
+            initLevel();
+        });
+
+        function updateHUD() {
+            document.getElementById('hud-mission').innerText = `${Math.min(currentQuestionIndex + 1, 10)}/10`;
+            document.getElementById('hud-score').innerText = score;
+            document.getElementById('hud-coins').innerText = coinsCollected;
+        }
+
+        function triggerQuiz(checkpointIndex) {
+            gameState = 'QUIZ';
+            currentQuestionIndex = checkpointIndex;
+            updateHUD();
+
+            const qData = quizData[checkpointIndex];
+            document.getElementById('quiz-checkpoint-title').innerText = `SOALAN ${checkpointIndex + 1} / 10`;
+            document.getElementById('quiz-question').innerText = qData.q;
+            
+            const graphicContainer = document.getElementById('quiz-graphic');
+            graphicContainer.innerHTML = '';
+
+            if (qData.graphic) {
+                graphicContainer.style.display = 'flex';
+                graphicContainer.innerHTML = qData.graphic;
+            } else {
+                graphicContainer.style.display = 'none';
+            }
+
+            const optionsContainer = document.getElementById('quiz-options');
+            optionsContainer.innerHTML = '';
+            
+            const feedbackBox = document.getElementById('quiz-feedback');
+            feedbackBox.classList.add('hidden');
+            
+            const nextBtn = document.getElementById('btn-next-question');
+            nextBtn.classList.add('hidden');
+
+            qData.options.forEach((opt) => {
+                const btn = document.createElement('button');
+                btn.className = "p-3 rounded-2xl border-2 border-amber-300 bg-amber-50 hover:bg-yellow-200 text-slate-800 font-bold transition flex flex-col items-center justify-center text-center shadow-sm cursor-pointer";
+                
+                if (qData.isVisualOptions) {
+                    btn.innerHTML = `
+                        <div class="mb-1">${opt.svg}</div>
+                        <span class="text-xs font-semibold">${opt.label}</span>
+                    `;
+                } else {
+                    btn.innerHTML = `<span class="text-sm md:text-base">${opt.text}</span>`;
+                }
+
+                btn.onclick = () => handleAnswerSelect(opt, qData, btn);
+                optionsContainer.appendChild(btn);
+            });
+
+            document.getElementById('quiz-modal').classList.remove('hidden');
+        }
+
+        function handleAnswerSelect(selectedOption, qData, clickedBtn) {
+            const allOptionBtns = document.getElementById('quiz-options').children;
+            for (let b of allOptionBtns) {
+                b.disabled = true;
+                b.classList.add('opacity-60', 'cursor-not-allowed');
+            }
+
+            const feedbackBox = document.getElementById('quiz-feedback');
+            feedbackBox.classList.remove('hidden');
+
+            if (selectedOption.isCorrect) {
+                soundManager.playCorrect();
+                score += 10;
+                correctAnswersCount++;
+                clickedBtn.classList.remove('bg-amber-50', 'border-amber-300');
+                clickedBtn.classList.add('bg-green-100', 'border-green-500', 'text-green-900', 'ring-4', 'ring-green-300');
+
+                feedbackBox.className = "p-3 rounded-xl font-bold text-center text-xs md:text-sm bg-green-100 text-green-800 border-2 border-green-400";
+                feedbackBox.innerHTML = `🌟 BETUL! HEBAT! TERUSKAN MISI!<br><span class="text-xs font-normal">${qData.explanation}</span>`;
+
+                mario.vy = -8;
+            } else {
+                soundManager.playWrong();
+                score = Math.max(0, score - 10);
+                clickedBtn.classList.remove('bg-amber-50', 'border-amber-300');
+                clickedBtn.classList.add('bg-red-100', 'border-red-500', 'text-red-900');
+
+                feedbackBox.className = "p-3 rounded-xl font-bold text-center text-xs md:text-sm bg-red-100 text-red-800 border-2 border-red-400";
+                feedbackBox.innerHTML = `OPS! JAWAPAN SALAH. AWAS CENDAWAN RACUN!<br><span class="text-xs font-normal">${qData.explanation}</span>`;
+
+                enemies.push({
+                    x: mario.x + 150,
+                    y: canvas.height - 90,
+                    width: 30,
+                    height: 30,
+                    vx: -2,
+                    minX: mario.x - 50,
+                    maxX: mario.x + 250
+                });
+            }
+
+            updateHUD();
+
+            // Auto-save intermediate score update
+            saveStudentResultToCloud(false);
+
+            const nextBtn = document.getElementById('btn-next-question');
+            nextBtn.classList.remove('hidden');
+            nextBtn.onclick = () => {
+                document.getElementById('quiz-modal').classList.add('hidden');
+                gameState = 'PLAYING';
+                mario.x += 40;
+            };
+        }
+
+        function update() {
+            if (gameState !== 'PLAYING') return;
+
+            if (keys.left) {
+                mario.vx = -mario.speed;
+                mario.facing = 'left';
+            } else if (keys.right) {
+                mario.vx = mario.speed;
+                mario.facing = 'right';
+            } else {
+                mario.vx *= 0.8;
+            }
+
+            mario.x += mario.vx;
+            mario.vy += 0.65;
+            mario.y += mario.vy;
+
+            mario.isGrounded = false;
+            platforms.forEach(plat => {
+                if (mario.x + mario.width > plat.x &&
+                    mario.x < plat.x + plat.width &&
+                    mario.y + mario.height >= plat.y &&
+                    mario.y + mario.height <= plat.y + 15 &&
+                    mario.vy >= 0) {
+                    mario.y = plat.y - mario.height;
+                    mario.vy = 0;
+                    mario.isGrounded = true;
+                }
+            });
+
+            if (mario.y + mario.height > canvas.height) {
+                mario.y = canvas.height - 60 - mario.height;
+                mario.vy = 0;
+                mario.isGrounded = true;
+            }
+
+            coins.forEach(coin => {
+                if (!coin.collected) {
+                    const dist = Math.hypot((mario.x + mario.width/2) - coin.x, (mario.y + mario.height/2) - coin.y);
+                    if (dist < coin.radius + 18) {
+                        coin.collected = true;
+                        score += 5;
+                        coinsCollected++;
+                        soundManager.playCoin();
+                        updateHUD();
+                    }
+                }
+            });
+
+            checkpoints.forEach(cp => {
+                if (!cp.triggered && mario.x + mario.width >= cp.x) {
+                    cp.triggered = true;
+                    triggerQuiz(cp.index);
+                }
+            });
+
+            enemies.forEach(en => {
+                en.x += en.vx;
+                if (en.x <= en.minX || en.x + en.width >= en.maxX) {
+                    en.vx *= -1;
+                }
+
+                if (mario.x + mario.width > en.x &&
+                    mario.x < en.x + en.width &&
+                    mario.y + mario.height > en.y &&
+                    mario.y < en.y + en.height) {
+                    soundManager.playWrong();
+                    score = Math.max(0, score - 10);
+                    mario.vy = -8;
+                    mario.vx = mario.facing === 'right' ? -6 : 6;
+                    updateHUD();
+                }
+            });
+
+            // Trigger victory and save completed record
+            if (trophy && !trophy.touched && mario.x + mario.width >= trophy.x) {
+                trophy.touched = true;
+                gameState = 'VICTORY';
+                score += 50;
+                soundManager.playVictory();
+                updateHUD();
+
+                document.getElementById('final-name').innerText = `${studentName} (${studentClass})`;
+                document.getElementById('final-score').innerText = score;
+                document.getElementById('final-correct').innerText = `${correctAnswersCount} / 10`;
+                document.getElementById('victory-modal').classList.remove('hidden');
+
+                // Save final score state permanently
+                saveStudentResultToCloud(true);
+            }
+
+            cameraX = mario.x - canvas.width * 0.3;
+            if (cameraX < 0) cameraX = 0;
+        }
+
+        function drawBackground() {
+            const skyGrad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            skyGrad.addColorStop(0, '#38bdf8');
+            skyGrad.addColorStop(1, '#bae6fd');
+            ctx.fillStyle = skyGrad;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+            [100, 400, 800, 1200, 1600, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 5500].forEach(cx => {
+                const screenX = cx - cameraX * 0.3;
+                ctx.beginPath();
+                ctx.arc(screenX, 80, 25, 0, Math.PI * 2);
+                ctx.arc(screenX + 25, 70, 30, 0, Math.PI * 2);
+                ctx.arc(screenX + 50, 80, 25, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            ctx.fillStyle = '#4ade80';
+            [200, 900, 1600, 2300, 3000, 3700, 4400, 5100].forEach(hx => {
+                const screenX = hx - cameraX * 0.5;
+                ctx.beginPath();
+                ctx.ellipse(screenX, canvas.height - 50, 120, 80, 0, Math.PI, 0);
+                ctx.fill();
+            });
+        }
+
+        function drawPlatforms() {
+            platforms.forEach(plat => {
+                const x = plat.x - cameraX;
+                ctx.fillStyle = '#22c55e';
+                ctx.fillRect(x, plat.y, plat.width, 16);
+                
+                ctx.fillStyle = '#b45309';
+                ctx.fillRect(x, plat.y + 16, plat.width, plat.height - 16);
+
+                ctx.strokeStyle = '#78350f';
+                ctx.lineWidth = 2;
+                for (let bx = x; bx < x + plat.width; bx += 30) {
+                    ctx.strokeRect(bx, plat.y + 16, 30, 20);
+                }
+            });
+        }
+
+        function drawPipes() {
+            pipes.forEach(pipe => {
+                const x = pipe.x - cameraX;
+                ctx.fillStyle = '#16a34a';
+                ctx.fillRect(x - 4, pipe.y, pipe.width + 8, 16);
+                ctx.strokeStyle = '#14532d';
+                ctx.lineWidth = 3;
+                ctx.strokeRect(x - 4, pipe.y, pipe.width + 8, 16);
+
+                ctx.fillRect(x, pipe.y + 16, pipe.width, pipe.height - 16);
+                ctx.strokeRect(x, pipe.y + 16, pipe.width, pipe.height - 16);
+            });
+        }
+
+        function drawCoins() {
+            coins.forEach(coin => {
+                if (coin.collected) return;
+                const x = coin.x - cameraX;
+                ctx.fillStyle = '#eab308';
+                ctx.strokeStyle = '#ca8a04';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(x, coin.y, coin.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.fillStyle = '#fef08a';
+                ctx.fillRect(x - 2, coin.y - 5, 4, 10);
+            });
+        }
+
+        function drawCheckpoints() {
+            checkpoints.forEach((cp, idx) => {
+                const x = cp.x - cameraX;
+                ctx.fillStyle = '#cbd5e1';
+                ctx.fillRect(x, cp.y, 6, cp.height);
+
+                ctx.fillStyle = cp.triggered ? '#22c55e' : '#ef4444';
+                ctx.beginPath();
+                ctx.moveTo(x + 6, cp.y);
+                ctx.lineTo(x + 40, cp.y + 18);
+                ctx.lineTo(x + 6, cp.y + 36);
+                ctx.closePath();
+                ctx.fill();
+
+                ctx.fillStyle = '#f59e0b';
+                ctx.fillRect(x - 20, cp.y + 40, 46, 24);
+                ctx.strokeStyle = '#78350f';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(x - 20, cp.y + 40, 46, 24);
+
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 12px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(`Q${idx + 1}`, x + 3, cp.y + 56);
+            });
+        }
+
+        function drawEnemies() {
+            enemies.forEach(en => {
+                const x = en.x - cameraX;
+                ctx.fillStyle = '#7e22ce';
+                ctx.beginPath();
+                ctx.arc(x + en.width / 2, en.y + 12, 16, Math.PI, 0);
+                ctx.fill();
+
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.arc(x + 8, en.y + 6, 3, 0, Math.PI * 2);
+                ctx.arc(x + 22, en.y + 6, 3, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = '#fef08a';
+                ctx.fillRect(x + 8, en.y + 12, 14, 16);
+
+                ctx.fillStyle = '#000000';
+                ctx.fillRect(x + 10, en.y + 15, 3, 5);
+                ctx.fillRect(x + 17, en.y + 15, 3, 5);
+            });
+        }
+
+        function drawTrophy() {
+            if (!trophy) return;
+            const x = trophy.x - cameraX;
+            ctx.fillStyle = '#f59e0b';
+            ctx.fillRect(x + 10, trophy.y + 40, 30, 15);
+
+            ctx.fillStyle = '#eab308';
+            ctx.beginPath();
+            ctx.moveTo(x + 5, trophy.y);
+            ctx.lineTo(x + 45, trophy.y);
+            ctx.lineTo(x + 35, trophy.y + 30);
+            ctx.lineTo(x + 15, trophy.y + 30);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.strokeStyle = '#ca8a04';
+            ctx.lineWidth = 4;
+            ctx.strokeRect(x, trophy.y + 5, 50, 15);
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('PIALA 3D', x + 25, trophy.y - 10);
+        }
+
+        function drawMario() {
+            const x = mario.x - cameraX;
+            const y = mario.y;
+
+            ctx.fillStyle = '#dc2626';
+            ctx.fillRect(x + 6, y, 24, 10);
+
+            ctx.fillStyle = '#fde047';
+            ctx.fillRect(x + 8, y + 10, 20, 12);
+
+            ctx.fillStyle = '#451a03';
+            ctx.fillRect(x + (mario.facing === 'right' ? 14 : 6), y + 18, 14, 4);
+
+            ctx.fillStyle = '#2563eb';
+            ctx.fillRect(x + 6, y + 22, 24, 18);
+
+            ctx.fillStyle = '#dc2626';
+            ctx.fillRect(x + 2, y + 22, 6, 12);
+            ctx.fillRect(x + 28, y + 22, 6, 12);
+
+            ctx.fillStyle = '#78350f';
+            ctx.fillRect(x + 4, y + 40, 12, 8);
+            ctx.fillRect(x + 20, y + 40, 12, 8);
+        }
+
+        function gameLoop() {
+            update();
+
+            drawBackground();
+            drawPlatforms();
+            drawPipes();
+            drawCoins();
+            drawCheckpoints();
+            drawEnemies();
+            drawTrophy();
+            drawMario();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        window.onload = function() {
+            gameLoop();
+        };
+    </script>
+</body>
+</html>
